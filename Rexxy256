@@ -1,0 +1,234 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include "Adafruit_Keypad.h"
+
+// ===============================
+// OLED Definitions
+// ===============================
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+#define SCREEN_ADDRESS 0x3C
+#define SDA_PIN 21
+#define SCL_PIN 22
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// ===============================
+// Keypad Definitions
+// ===============================
+const byte ROWS = 4;
+const byte COLS = 4;
+
+char keys[ROWS][COLS] = {
+  {'1','2','3','A'},
+  {'4','5','6','B'},
+  {'7','8','9','C'},
+  {'*','0','#','D'}
+};
+
+byte rowPins[ROWS] = {23, 26, 25, 27};
+byte colPins[COLS] = {32, 13, 12, 19};
+
+Adafruit_Keypad keypad = Adafruit_Keypad(
+  makeKeymap(keys), rowPins, colPins, ROWS, COLS
+);
+
+// ===============================
+// Structs
+// ===============================
+struct Entity {
+  int x;
+  int y;
+};
+
+Entity player = {0, 0};
+Entity enemy  = {3, 3};
+
+// ===============================
+// Game State
+// ===============================
+int grid[4][4] = {0};
+
+int currentValue = 2;
+int pressesNeeded = 1;
+int pressCount = 0;
+char lastKey = 0;
+
+bool gameOver = false;
+int finalScore = 0;
+
+// ===============================
+// Setup
+// ===============================
+void setup() {
+  Serial.begin(115200);
+  Wire.begin(SDA_PIN, SCL_PIN);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+    while (true);
+  }
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0,0);
+  display.println("Rexxy 256");
+  display.display();
+
+  keypad.begin();
+  randomSeed(analogRead(0));
+}
+
+// ===============================
+// Main Loop
+// ===============================
+void loop() {
+  keypad.tick();
+
+  while (keypad.available()) {
+    keypadEvent e = keypad.read();
+    if (e.bit.EVENT == KEY_JUST_PRESSED && !gameOver) {
+      handleInput((char)e.bit.KEY);
+    }
+  }
+
+  drawBoard();
+  delay(100);
+}
+
+// ===============================
+// Player Input & Value Placement
+// ===============================
+void handleInput(char key) {
+
+  // New key → move cursor
+  if (key != lastKey) {
+    lastKey = key;
+    pressCount = 0;
+    movePlayer(key);
+    return;
+  }
+
+  // Same key → build value
+  pressCount++;
+
+  if (pressCount >= pressesNeeded) {
+
+    // Place value on current tile
+    grid[player.x][player.y] = currentValue;
+
+    // CHECK FOR WIN (256 placed)
+    if (currentValue == 256) {
+      gameOver = true;
+      finalScore = calculateScore();
+      return; // Stop further actions
+    }
+
+    // Advance progression only if game not over
+    currentValue *= 2;
+    pressesNeeded++;
+    pressCount = 0;
+
+    // Enemy acts after placement
+    moveEnemy();
+    eraseEnemyTile();
+  }
+}
+
+// ===============================
+// Player Movement (Any Tile)
+// ===============================
+void movePlayer(char key) {
+  switch (key) {
+    case '1': player = {0,0}; break;
+    case '2': player = {0,1}; break;
+    case '3': player = {0,2}; break;
+    case 'A': player = {0,3}; break;
+
+    case '4': player = {1,0}; break;
+    case '5': player = {1,1}; break;
+    case '6': player = {1,2}; break;
+    case 'B': player = {1,3}; break;
+
+    case '7': player = {2,0}; break;
+    case '8': player = {2,1}; break;
+    case '9': player = {2,2}; break;
+    case 'C': player = {2,3}; break;
+
+    case '*': player = {3,0}; break;
+    case '0': player = {3,1}; break;
+    case '#': player = {3,2}; break;
+    case 'D': player = {3,3}; break;
+  }
+}
+
+// ===============================
+// Enemy Logic
+// ===============================
+void moveEnemy() {
+  enemy.x = random(0, 4);
+  enemy.y = random(0, 4);
+}
+
+void eraseEnemyTile() {
+  if (grid[enemy.x][enemy.y] > 0) {
+    grid[enemy.x][enemy.y] = 0;
+  }
+}
+
+// ===============================
+// Score Calculation
+// ===============================
+int calculateScore() {
+  int sum = 0;
+  for (int i = 0; i < 4; i++) {
+    for (int j = 0; j < 4; j++) {
+      sum += grid[i][j];
+    }
+  }
+  return sum;
+}
+
+// ===============================
+// Display Board
+// ===============================
+void drawBoard() {
+  display.clearDisplay();
+  display.setTextSize(1);
+
+  display.setCursor(0,0);
+
+  if (gameOver) {
+    display.print("GAME OVER");
+    display.setCursor(0,10);
+    display.print("Score: ");
+    display.print(finalScore);
+  } else {
+    display.print("Next: ");
+    display.print(currentValue);
+  }
+
+  for (int i = 0; i < 4; i++) {
+    for (int j = 0; j < 4; j++) {
+
+      display.setCursor(j * 30, i * 12 + 16);
+
+      if (player.x == i && player.y == j) {
+        display.print("R");
+      }
+      else if (enemy.x == i && enemy.y == j && !gameOver) {
+        display.print("E");
+      }
+      else if (grid[i][j] > 0) {
+        display.print(grid[i][j]);
+      }
+      else {
+        display.print(".");
+      }
+    }
+  }
+
+  display.display();
+}
